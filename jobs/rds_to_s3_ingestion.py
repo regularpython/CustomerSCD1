@@ -20,29 +20,46 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger("PySparkJob")
+env = 'dev'
+if env == 'local':
 
+    java_home = os.environ.get("JAVA_HOME")
+    print(java_home)
+    os.environ["HADOOP_HOME"] = r"C:\hadoop"
+    os.environ["PATH"] = os.environ["HADOOP_HOME"] + r"\bin;" + os.environ["PATH"]
+    OUTPUT_PATH = os.environ["OUTPUT_PATH"]
 
-java_home = os.environ.get("JAVA_HOME")
-print(java_home)
-os.environ["HADOOP_HOME"] = r"C:\hadoop"
-os.environ["PATH"] = os.environ["HADOOP_HOME"] + r"\bin;" + os.environ["PATH"]
-OUTPUT_PATH = os.environ["OUTPUT_PATH"]
+    PKGS = "org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.367"
+    logger.info("Creating Spark session...")
+    spark = (
+        SparkSession.builder
+        .appName("pyspark_test")
+        .master("local[*]")
+        .config("spark.jars.packages", PKGS)
+        .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
+        .config("spark.hadoop.fs.s3a.aws.credentials.provider",
+                "com.amazonaws.auth.DefaultAWSCredentialsProviderChain")
+        .config("spark.hadoop.fs.s3a.connection.maximum", "200")
+        .config("spark.jars", r"C:\Users\Bhavani_Sai\Downloads\mysql-connector-j-9.4.0\mysql-connector-j-9.4.0\mysql-connector-j-9.4.0.jar")
+        .getOrCreate()
+    )
+    logger.info("Spark session created successfully.")
+else:
+    import sys
+    from awsglue.transforms import *
+    from awsglue.utils import getResolvedOptions
+    from pyspark.context import SparkContext
+    from awsglue.context import GlueContext
+    from awsglue.job import Job
 
-PKGS = "org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.367"
-logger.info("Creating Spark session...")
-spark = (
-    SparkSession.builder
-    .appName("pyspark_test")
-    .master("local[*]")
-    .config("spark.jars.packages", PKGS)
-    .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
-    .config("spark.hadoop.fs.s3a.aws.credentials.provider",
-            "com.amazonaws.auth.DefaultAWSCredentialsProviderChain")
-    .config("spark.hadoop.fs.s3a.connection.maximum", "200")
-    .config("spark.jars", r"C:\Users\Bhavani_Sai\Downloads\mysql-connector-j-9.4.0\mysql-connector-j-9.4.0\mysql-connector-j-9.4.0.jar")
-    .getOrCreate()
-)
-logger.info("Spark session created successfully.")
+    OUTPUT_PATH = "s3a://batch89-pyspark/CustomerSCD1JOBS/cleaned-data"
+    ## @params: [JOB_NAME]
+    args = getResolvedOptions(sys.argv, ['JOB_NAME'])
+    print('Hello World!')
+    sc = SparkContext()
+    glueContext = GlueContext(sc)
+    spark = glueContext.spark_session
+
 
 
 def get_secret():
@@ -119,14 +136,14 @@ df_no_empty = df.select([when(col(c) == "", None).otherwise(col(c)).alias(c) for
 # Drop rows where any column is NULL
 df_clean = df_no_empty.dropna(how="any")
 logger.info("Cleaned DataFrame after dropping NULLs and empty strings:")
-
+df_clean = df_clean.withColumn("record_date", col("record_date").cast("string"))
 df_clean.show()
 
 
 # Write to Parquet partitioned by record_date
 output_path = OUTPUT_PATH  # or "file:///tmp/output"
 logger.info(f"Writing cleaned data to {output_path} partitioned by record_date...")
-df_clean.write.mode("overwrite").partitionBy("record_date").parquet(output_path)
+df_clean.write.mode("overwrite").parquet(output_path)
 
 print(f"Data written successfully to {output_path} partitioned by record_date")
 logger.info("Data written successfully.")
